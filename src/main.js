@@ -7,12 +7,7 @@ import gsap from 'gsap';
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xf0f0f0);
 
-const camera = new THREE.PerspectiveCamera(
-  60,
-  window.innerWidth / window.innerHeight,
-  0.1,
-  1000
-);
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
 camera.position.set(0, 5, 10);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -50,18 +45,17 @@ paper.rotation.x = -Math.PI / 2;
 scene.add(paper);
 
 // ---------- Pen Holder ----------
-const holder = new GLTFLoader();
+const loader = new GLTFLoader();
 let holderMesh;
 
-holder.load('/pen_holder2.glb', gltf => {
+loader.load('/pen_holder2.glb', gltf => {
   holderMesh = gltf.scene;
-  holderMesh.position.set(-6, 0, 0); // adjust height as needed
-  holderMesh.scale.set(7, 7, 7); // scale if needed
+  holderMesh.position.set(-6, 0, 0);
+  holderMesh.scale.set(8, 8, 8); // scale to fit pens
   scene.add(holderMesh);
 });
 
 // ---------- Pen Logic ----------
-const loader = new GLTFLoader();
 let pens = [];
 let activePen = null;
 let isDrawing = false;
@@ -69,25 +63,24 @@ let eraserMode = false;
 
 const penColors = ['red', 'green', 'blue', 'black'];
 
-function slotPosition(index, total, radius = 0.4) {
+// Slot positions relative to holder
+function slotPosition(index, total, radius = 0.3, heightOffset = 0) {
   if (!holderMesh) return { x: 0, y: 0.2, z: 0 };
-
   const angle = (index / total) * Math.PI * 2;
-  const holderPos = holderMesh.position;
-
+  const pos = holderMesh.position;
   return {
-    x: holderPos.x + Math.cos(angle) * radius,
-    y: holderPos.y + 0.2, // adjust according to holder height
-    z: holderPos.z + Math.sin(angle) * radius
+    x: pos.x + Math.cos(angle) * radius,
+    y: pos.y + heightOffset,
+    z: pos.z + Math.sin(angle) * radius
   };
 }
 
-// Load pen model and create colored clones
+// Load pen model and clone with colors
 loader.load('/pen.glb', gltf => {
   penColors.forEach((color, i) => {
     const pen = gltf.scene.clone(true);
     pen.traverse(child => {
-      if (child.isMesh) child.material = new THREE.MeshStandardMaterial({ color: color });
+      if (child.isMesh) child.material = new THREE.MeshStandardMaterial({ color });
     });
 
     pen.scale.set(0.3, 0.3, 0.3);
@@ -95,7 +88,7 @@ loader.load('/pen.glb', gltf => {
     pen.position.set(slot.x, slot.y, slot.z);
 
     scene.add(pen);
-    pens.push({ mesh: pen, color: color });
+    pens.push({ mesh: pen, color });
   });
 });
 
@@ -116,17 +109,19 @@ renderer.domElement.addEventListener('pointerdown', event => {
   mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
   raycaster.setFromCamera(mouse, camera);
-  const intersects = raycaster.intersectObjects([...pens.map(p => p.mesh), holder], true);
+  const intersects = raycaster.intersectObjects([...pens.map(p => p.mesh), holderMesh].filter(Boolean), true);
 
   if (intersects.length > 0) {
     const obj = intersects[0].object;
     const penData = getRootPen(obj);
 
+    const isHolderClicked = holderMesh && (obj === holderMesh || holderMesh.getObjectById(obj.id));
+
     if (penData && !activePen) {
       // Pick pen
       activePen = penData;
       gsap.to(activePen.mesh.position, { x: 0, y: 2, z: 0, duration: 0.5, ease: "power2.out" });
-    } else if (obj === holder && activePen) {
+    } else if (isHolderClicked && activePen) {
       // Put back pen
       const slot = slotPosition(pens.indexOf(activePen), pens.length);
       gsap.to(activePen.mesh.position, {
@@ -149,13 +144,13 @@ renderer.domElement.addEventListener('pointerdown', event => {
 
 renderer.domElement.addEventListener('pointerup', () => { isDrawing = false; });
 
-// ---------- Drawing Setup ----------
+// ---------- Drawing Canvas ----------
 const drawCanvas = document.createElement('canvas');
 drawCanvas.width = 1024;
 drawCanvas.height = 1024;
 const drawCtx = drawCanvas.getContext('2d');
 drawCtx.fillStyle = '#fff';
-drawCtx.fillRect(0, 0, 1024, 1024);
+drawCtx.fillRect(0, 0, drawCanvas.width, drawCanvas.height);
 
 const drawTexture = new THREE.CanvasTexture(drawCanvas);
 paper.material.map = drawTexture;
@@ -201,7 +196,7 @@ function animate() {
 }
 animate();
 
-// ---------- Resize ----------
+// ---------- Window Resize ----------
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
