@@ -46,6 +46,44 @@ const paper = new THREE.Mesh(
 paper.rotation.x = -Math.PI / 2;
 scene.add(paper);
 
+// ---------- Layers Setup ----------
+const layers = [];
+let activeLayerIndex = 0;
+function createLayer() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 1024;
+  canvas.height = 1024;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const texture = new THREE.CanvasTexture(canvas);
+  layers.push({ canvas, ctx, texture });
+  return layers.length - 1;
+}
+
+// Default: create 5 layers
+for (let i = 0; i < 5; i++) createLayer();
+paper.material.map = layers[activeLayerIndex].texture;
+
+// Layer switch UI
+const layerContainer = document.createElement('div');
+layerContainer.style.position = 'absolute';
+layerContainer.style.top = '10px';
+layerContainer.style.left = '10px';
+layerContainer.style.zIndex = '1000';
+document.body.appendChild(layerContainer);
+
+layers.forEach((_, i) => {
+  const btn = document.createElement('button');
+  btn.innerText = `Layer ${i + 1}`;
+  btn.style.marginRight = '5px';
+  btn.addEventListener('click', () => {
+    activeLayerIndex = i;
+    paper.material.map = layers[activeLayerIndex].texture;
+  });
+  layerContainer.appendChild(btn);
+});
+
 // ---------- Pen Holder ----------
 let holderMesh;
 loader.load('/pen_holder2.glb', gltf => {
@@ -139,23 +177,14 @@ function getRootPen(obj) {
   return null;
 }
 
-// ---------- Drawing Canvas ----------
-const drawCanvas = document.createElement('canvas');
-drawCanvas.width = 1024;
-drawCanvas.height = 1024;
-const drawCtx = drawCanvas.getContext('2d');
-drawCtx.fillStyle = '#fff';
-drawCtx.fillRect(0, 0, drawCanvas.width, drawCanvas.height);
-const drawTexture = new THREE.CanvasTexture(drawCanvas);
-paper.material.map = drawTexture;
-
-let isDrawing = false;
-let lastPointerPos = null;
-
 // ---------- Pen Flex / Wobble ----------
 const penFlex = { maxCompress: 0.05, speed: 0.1, maxWobble: 0.05 };
 
 // ---------- Pointer Events ----------
+let isDrawing = false;
+let lastPointerPos = null;
+const smoothedPos = new THREE.Vector3();
+
 renderer.domElement.addEventListener('pointerdown', event => {
   mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
   mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
@@ -221,9 +250,7 @@ renderer.domElement.addEventListener('pointerup', () => {
   }
 });
 
-// ---------- Drawing / Erasing with Smoothing ----------
-const smoothedPos = new THREE.Vector3();
-
+// ---------- Drawing / Erasing ----------
 window.addEventListener('pointermove', event => {
   if (!isDrawing) return;
 
@@ -236,41 +263,36 @@ window.addEventListener('pointermove', event => {
 
   const p = intersects[0].point;
   const uv = intersects[0].uv;
+  const layer = layers[activeLayerIndex];
 
   if (activePen) {
-    // --------- Pen smoothing (lag) ---------
-    smoothedPos.lerpVectors(smoothedPos.length() === 0 ? p : smoothedPos, p, 0.2); // 0.2 = smoothing factor
+    smoothedPos.lerpVectors(smoothedPos.length() === 0 ? p : smoothedPos, p, 0.2);
 
-    // Speed & variable pen size
     const distance = lastPointerPos.pos.distanceTo(smoothedPos);
     const speed = distance / 0.016;
     const radius = THREE.MathUtils.clamp(6 / (speed + 1), 1.5, 4);
 
-    // Solid line interpolation between last UV and current UV
-    const steps = Math.ceil(lastPointerPos.uv.distanceTo(uv) * drawCanvas.width * 2);
+    const steps = Math.ceil(lastPointerPos.uv.distanceTo(uv) * layer.canvas.width * 2);
     for (let i = 0; i <= steps; i++) {
       const t = i / steps;
       const interpU = lastPointerPos.uv.x + (uv.x - lastPointerPos.uv.x) * t;
       const interpV = lastPointerPos.uv.y + (uv.y - lastPointerPos.uv.y) * t;
-      const px = interpU * drawCanvas.width;
-      const py = (1 - interpV) * drawCanvas.height;
+      const px = interpU * layer.canvas.width;
+      const py = (1 - interpV) * layer.canvas.height;
 
-      drawCtx.fillStyle = activePen.color;
-      drawCtx.beginPath();
-      drawCtx.arc(px, py, radius, 0, Math.PI * 2);
-      drawCtx.fill();
+      layer.ctx.fillStyle = activePen.color;
+      layer.ctx.beginPath();
+      layer.ctx.arc(px, py, radius, 0, Math.PI * 2);
+      layer.ctx.fill();
     }
 
-    // Pen follow smoothed position
     gsap.to(activePen.mesh.position, { x: smoothedPos.x, y: smoothedPos.y + 0.1, z: smoothedPos.z, duration: 0.05 });
     activePen.mesh.lookAt(paper.position);
 
-    // Tilt + wobble
     const delta = new THREE.Vector3().subVectors(smoothedPos, lastPointerPos.pos);
     activePen.mesh.rotation.x = 0.1 + delta.z * 0.2 + (Math.random() - 0.5) * penFlex.maxWobble;
     activePen.mesh.rotation.z = -delta.x * 0.2 + (Math.random() - 0.5) * penFlex.maxWobble;
 
-    // Pen flex
     const compressAmount = penFlex.maxCompress;
     gsap.to(activePen.mesh.scale, {
       y: 0.3 - compressAmount,
@@ -284,13 +306,13 @@ window.addEventListener('pointermove', event => {
     lastPointerPos.uv = uv.clone();
   } else if (eraserMode && eraserMesh) {
     const radius = 20;
-    const px = uv.x * drawCanvas.width;
-    const py = (1 - uv.y) * drawCanvas.height;
+    const px = uv.x * layer.canvas.width;
+    const py = (1 - uv.y) * layer.canvas.height;
 
-    drawCtx.fillStyle = '#fff';
-    drawCtx.beginPath();
-    drawCtx.arc(px, py, radius, 0, Math.PI * 2);
-    drawCtx.fill();
+    layer.ctx.fillStyle = '#fff';
+    layer.ctx.beginPath();
+    layer.ctx.arc(px, py, radius, 0, Math.PI * 2);
+    layer.ctx.fill();
 
     const paperTopY = paper.position.y + 0.25;
     gsap.to(eraserMesh.position, { x: p.x, y: paperTopY, z: p.z, duration: 0.02 });
@@ -298,14 +320,14 @@ window.addEventListener('pointermove', event => {
     eraserMesh.rotation.z = 0.05;
   }
 
-  drawTexture.needsUpdate = true;
+  layer.texture.needsUpdate = true;
 });
 
-// ---------- Full Page Refresh Button ----------
+// ---------- Clear Canvas ----------
 const clearBtn = document.createElement('button');
-clearBtn.innerText = 'Clear Canvas';
+clearBtn.innerText = 'Clear Current Layer';
 clearBtn.style.position = 'absolute';
-clearBtn.style.top = '10px';
+clearBtn.style.top = '50px';
 clearBtn.style.right = '10px';
 clearBtn.style.padding = '10px 15px';
 clearBtn.style.fontSize = '16px';
@@ -313,10 +335,10 @@ clearBtn.style.zIndex = '1000';
 document.body.appendChild(clearBtn);
 
 clearBtn.addEventListener('click', () => {
-  // Clear canvas
-  drawCtx.fillStyle = '#fff';
-  drawCtx.fillRect(0, 0, drawCanvas.width, drawCanvas.height);
-  drawTexture.needsUpdate = true;
+  const layer = layers[activeLayerIndex];
+  layer.ctx.fillStyle = '#fff';
+  layer.ctx.fillRect(0, 0, layer.canvas.width, layer.canvas.height);
+  layer.texture.needsUpdate = true;
 
   // Reset pen positions
   pens.forEach((p, i) => {
