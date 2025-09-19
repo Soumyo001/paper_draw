@@ -46,9 +46,10 @@ const paper = new THREE.Mesh(
 paper.rotation.x = -Math.PI / 2;
 scene.add(paper);
 
-// ---------- Layers Setup ----------
+// ---------- Layers ----------
 const layers = [];
 let activeLayerIndex = 0;
+
 function createLayer() {
   const canvas = document.createElement('canvas');
   canvas.width = 1024;
@@ -61,11 +62,19 @@ function createLayer() {
   return layers.length - 1;
 }
 
+function deleteLayer(index) {
+  if (layers.length <= 1) return; // At least one layer must remain
+  layers.splice(index, 1);
+  if (activeLayerIndex >= layers.length) activeLayerIndex = layers.length - 1;
+  paper.material.map = layers[activeLayerIndex].texture;
+  updateLayerButtons();
+}
+
 // Default: create 5 layers
 for (let i = 0; i < 5; i++) createLayer();
 paper.material.map = layers[activeLayerIndex].texture;
 
-// Layer switch UI
+// Layer UI
 const layerContainer = document.createElement('div');
 layerContainer.style.position = 'absolute';
 layerContainer.style.top = '10px';
@@ -73,16 +82,34 @@ layerContainer.style.left = '10px';
 layerContainer.style.zIndex = '1000';
 document.body.appendChild(layerContainer);
 
-layers.forEach((_, i) => {
-  const btn = document.createElement('button');
-  btn.innerText = `Layer ${i + 1}`;
-  btn.style.marginRight = '5px';
-  btn.addEventListener('click', () => {
-    activeLayerIndex = i;
-    paper.material.map = layers[activeLayerIndex].texture;
+function updateLayerButtons() {
+  layerContainer.innerHTML = '';
+  layers.forEach((_, i) => {
+    const btn = document.createElement('button');
+    btn.innerText = `Layer ${i + 1}`;
+    btn.style.marginRight = '5px';
+    btn.addEventListener('click', () => {
+      activeLayerIndex = i;
+      paper.material.map = layers[activeLayerIndex].texture;
+    });
+    layerContainer.appendChild(btn);
+
+    const delBtn = document.createElement('button');
+    delBtn.innerText = 'X';
+    delBtn.style.marginRight = '10px';
+    delBtn.addEventListener('click', () => deleteLayer(i));
+    layerContainer.appendChild(delBtn);
   });
-  layerContainer.appendChild(btn);
-});
+
+  const addBtn = document.createElement('button');
+  addBtn.innerText = '+ Add Layer';
+  addBtn.addEventListener('click', () => {
+    createLayer();
+    updateLayerButtons();
+  });
+  layerContainer.appendChild(addBtn);
+}
+updateLayerButtons();
 
 // ---------- Pen Holder ----------
 let holderMesh;
@@ -240,6 +267,7 @@ renderer.domElement.addEventListener('pointerdown', event => {
       pos: paperIntersects[0].point.clone(),
       uv: paperIntersects[0].uv.clone()
     };
+    smoothedPos.copy(lastPointerPos.pos); // prevent first-frame jump
   }
 });
 
@@ -266,7 +294,7 @@ window.addEventListener('pointermove', event => {
   const layer = layers[activeLayerIndex];
 
   if (activePen) {
-    smoothedPos.lerpVectors(smoothedPos.length() === 0 ? p : smoothedPos, p, 0.2);
+    smoothedPos.lerpVectors(smoothedPos, p, 0.2);
 
     const distance = lastPointerPos.pos.distanceTo(smoothedPos);
     const speed = distance / 0.016;
