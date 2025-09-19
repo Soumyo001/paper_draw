@@ -118,11 +118,11 @@ renderer.domElement.addEventListener('pointerdown', event => {
     const isHolderClicked = holderMesh && (obj === holderMesh || holderMesh.getObjectById(obj.id));
 
     if (penData && !activePen) {
-      // Pick pen
+      // Pick pen with animation
       activePen = penData;
       gsap.to(activePen.mesh.position, { x: 0, y: 2, z: 0, duration: 0.5, ease: "power2.out" });
     } else if (isHolderClicked && activePen) {
-      // Put back pen
+      // Put back pen smoothly
       const slot = slotPosition(pens.indexOf(activePen), pens.length);
       gsap.to(activePen.mesh.position, {
         x: slot.x,
@@ -177,17 +177,27 @@ window.addEventListener('pointermove', event => {
   }
 });
 
+// ---------- Keyboard Event: Toggle Eraser ----------
+window.addEventListener('keydown', e => {
+  if (e.key.toLowerCase() === 'e') {
+    eraserMode = !eraserMode;
+    console.log(`Eraser mode: ${eraserMode}`);
+  }
+});
+
 // ---------- Animate ----------
 function animate() {
   requestAnimationFrame(animate);
   controls.update();
 
+  // Pen follows pointer when drawing
   if (activePen) {
     raycaster.setFromCamera(mouse, camera);
     const intersects = raycaster.intersectObject(paper);
     if (intersects.length > 0) {
       const p = intersects[0].point;
-      activePen.mesh.position.set(p.x, p.y + 0.1, p.z);
+      // Smooth movement with gsap (optional)
+      gsap.to(activePen.mesh.position, { x: p.x, y: p.y + 0.1, z: p.z, duration: 0.1, ease: "power2.out" });
       activePen.mesh.lookAt(paper.position);
     }
   }
