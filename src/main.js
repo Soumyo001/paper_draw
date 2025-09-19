@@ -51,7 +51,7 @@ let holderMesh;
 loader.load('/pen_holder2.glb', gltf => {
   holderMesh = gltf.scene;
   holderMesh.position.set(-6, 0, 0);
-  holderMesh.scale.set(8, 8, 8); // scale to fit pens
+  holderMesh.scale.set(8, 8, 8);
   scene.add(holderMesh);
 });
 
@@ -60,6 +60,8 @@ let pens = [];
 let activePen = null;
 let isDrawing = false;
 let eraserMode = false;
+let eraserMesh = null;
+let eraserOriginalPos = new THREE.Vector3();
 
 const penColors = ['red', 'green', 'blue', 'black'];
 
@@ -92,6 +94,15 @@ loader.load('/pen.glb', gltf => {
   });
 });
 
+// ---------- Load Eraser ----------
+loader.load('/eraser.glb', gltf => {
+  eraserMesh = gltf.scene;
+  eraserMesh.position.set(6, 0.2, 0); // beside paper
+  eraserMesh.scale.set(-0.006, -0.006, -0.01);
+  eraserOriginalPos.copy(eraserMesh.position);
+  scene.add(eraserMesh);
+});
+
 // ---------- Raycaster ----------
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
@@ -102,47 +113,6 @@ function getRootPen(obj) {
   }
   return null;
 }
-
-// ---------- Pointer Events ----------
-renderer.domElement.addEventListener('pointerdown', event => {
-  mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-  mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
-
-  raycaster.setFromCamera(mouse, camera);
-  const intersects = raycaster.intersectObjects([...pens.map(p => p.mesh), holderMesh].filter(Boolean), true);
-
-  if (intersects.length > 0) {
-    const obj = intersects[0].object;
-    const penData = getRootPen(obj);
-
-    const isHolderClicked = holderMesh && (obj === holderMesh || holderMesh.getObjectById(obj.id));
-
-    if (penData && !activePen) {
-      // Pick pen with animation
-      activePen = penData;
-      gsap.to(activePen.mesh.position, { x: 0, y: 2, z: 0, duration: 0.5, ease: "power2.out" });
-    } else if (isHolderClicked && activePen) {
-      // Put back pen smoothly
-      const slot = slotPosition(pens.indexOf(activePen), pens.length);
-      gsap.to(activePen.mesh.position, {
-        x: slot.x,
-        y: slot.y,
-        z: slot.z,
-        duration: 0.5,
-        ease: "power2.inOut",
-        onComplete: () => { activePen = null; }
-      });
-    }
-  }
-
-  // Start drawing if clicking paper
-  if (activePen) {
-    const paperIntersects = raycaster.intersectObject(paper);
-    if (paperIntersects.length > 0) isDrawing = true;
-  }
-});
-
-renderer.domElement.addEventListener('pointerup', () => { isDrawing = false; });
 
 // ---------- Drawing Canvas ----------
 const drawCanvas = document.createElement('canvas');
@@ -155,9 +125,70 @@ drawCtx.fillRect(0, 0, drawCanvas.width, drawCanvas.height);
 const drawTexture = new THREE.CanvasTexture(drawCanvas);
 paper.material.map = drawTexture;
 
-// ---------- Mouse Move for Drawing ----------
+// ---------- Pointer Events ----------
+renderer.domElement.addEventListener('pointerdown', event => {
+  mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+  mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+  raycaster.setFromCamera(mouse, camera);
+  const objects = [...pens.map(p => p.mesh), holderMesh, eraserMesh].filter(Boolean);
+  const intersects = raycaster.intersectObjects(objects, true);
+
+  if (intersects.length > 0) {
+    const obj = intersects[0].object;
+
+    // Toggle eraser
+    if (eraserMesh && (obj === eraserMesh || eraserMesh.getObjectById(obj.id)) && !activePen) {
+      eraserMode = !eraserMode;
+      console.log(`Eraser mode: ${eraserMode}`);
+
+      if (!eraserMode) {
+        // Return eraser to original holder spot
+        gsap.to(eraserMesh.position, {
+          x: eraserOriginalPos.x,
+          y: eraserOriginalPos.y,
+          z: eraserOriginalPos.z,
+          duration: 0.5,
+          ease: "power2.inOut"
+        });
+      }
+    }
+
+    // Disable pen selection while erasing
+    if (eraserMode) return;
+
+    // Pen pick/return logic
+    const penData = getRootPen(obj);
+    const isHolderClicked = holderMesh && (obj === holderMesh || holderMesh.getObjectById(obj.id));
+
+    if (penData && !activePen) {
+      activePen = penData;
+      gsap.to(activePen.mesh.position, { x: 0, y: 2, z: 0, duration: 0.5, ease: "power2.out" });
+    } else if (isHolderClicked && activePen) {
+      const slot = slotPosition(pens.indexOf(activePen), pens.length);
+      gsap.to(activePen.mesh.position, {
+        x: slot.x,
+        y: slot.y,
+        z: slot.z,
+        duration: 0.5,
+        ease: "power2.inOut",
+        onComplete: () => { activePen = null; }
+      });
+    }
+  }
+
+  // Start drawing/erasing if clicking paper
+  const paperIntersects = raycaster.intersectObject(paper);
+  if (paperIntersects.length > 0 && (activePen || eraserMode)) {
+    isDrawing = true;
+  }
+});
+
+renderer.domElement.addEventListener('pointerup', () => { isDrawing = false; });
+
+// ---------- Mouse Move for Drawing / Erasing ----------
 window.addEventListener('pointermove', event => {
-  if (!activePen || !isDrawing) return;
+  if (!isDrawing) return;
 
   mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
   mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
@@ -165,23 +196,38 @@ window.addEventListener('pointermove', event => {
   raycaster.setFromCamera(mouse, camera);
   const intersects = raycaster.intersectObject(paper);
   if (intersects.length > 0) {
+    const p = intersects[0].point;
     const uv = intersects[0].uv;
     const x = uv.x * drawCanvas.width;
     const y = (1 - uv.y) * drawCanvas.height;
 
-    drawCtx.fillStyle = eraserMode ? '#fff' : activePen.color;
-    drawCtx.beginPath();
-    drawCtx.arc(x, y, eraserMode ? 20 : 3, 0, Math.PI * 2);
-    drawCtx.fill();
-    drawTexture.needsUpdate = true;
-  }
-});
+    if (activePen) {
+      // Draw with pen
+      drawCtx.fillStyle = activePen.color;
+      drawCtx.beginPath();
+      drawCtx.arc(x, y, 3, 0, Math.PI * 2);
+      drawCtx.fill();
 
-// ---------- Keyboard Event: Toggle Eraser ----------
-window.addEventListener('keydown', e => {
-  if (e.key.toLowerCase() === 'e') {
-    eraserMode = !eraserMode;
-    console.log(`Eraser mode: ${eraserMode}`);
+      // Pen follows pointer with slight lean
+      gsap.to(activePen.mesh.position, { x: p.x, y: p.y + 0.1, z: p.z, duration: 0.1 });
+      activePen.mesh.lookAt(paper.position);
+      activePen.mesh.rotation.x = 0.15; // tilt forward slightly
+      activePen.mesh.rotation.z = 0.05; // small twist
+    } else if (eraserMode && eraserMesh) {
+      // Erase
+      drawCtx.fillStyle = '#fff';
+      drawCtx.beginPath();
+      drawCtx.arc(x, y, 20, 0, Math.PI * 2);
+      drawCtx.fill();
+
+      // Stick eraser above paper with slight tilt
+      const paperTopY = paper.position.y + 0.1;
+      gsap.to(eraserMesh.position, { x: p.x, y: paperTopY, z: p.z, duration: 0.05 });
+      eraserMesh.rotation.x = -0.1; // tilt naturally while erasing
+      eraserMesh.rotation.z = 0.05;
+    }
+
+    drawTexture.needsUpdate = true;
   }
 });
 
@@ -189,19 +235,6 @@ window.addEventListener('keydown', e => {
 function animate() {
   requestAnimationFrame(animate);
   controls.update();
-
-  // Pen follows pointer when drawing
-  if (activePen) {
-    raycaster.setFromCamera(mouse, camera);
-    const intersects = raycaster.intersectObject(paper);
-    if (intersects.length > 0) {
-      const p = intersects[0].point;
-      // Smooth movement with gsap (optional)
-      gsap.to(activePen.mesh.position, { x: p.x, y: p.y + 0.1, z: p.z, duration: 0.1, ease: "power2.out" });
-      activePen.mesh.lookAt(paper.position);
-    }
-  }
-
   renderer.render(scene, camera);
 }
 animate();
