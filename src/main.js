@@ -65,7 +65,6 @@ let eraserOriginalPos = new THREE.Vector3();
 
 const penColors = ['red', 'green', 'blue', 'black'];
 
-// Slot positions relative to holder
 function slotPosition(index, total, radius = 0.3, heightOffset = 0) {
   if (!holderMesh) return { x: 0, y: 0.2, z: 0 };
   const angle = (index / total) * Math.PI * 2;
@@ -77,29 +76,45 @@ function slotPosition(index, total, radius = 0.3, heightOffset = 0) {
   };
 }
 
-// Load pen model and clone with colors
+// Load pen models
 loader.load('/pen.glb', gltf => {
   penColors.forEach((color, i) => {
     const pen = gltf.scene.clone(true);
     pen.traverse(child => {
       if (child.isMesh) child.material = new THREE.MeshStandardMaterial({ color });
     });
-
     pen.scale.set(0.3, 0.3, 0.3);
     const slot = slotPosition(i, penColors.length);
     pen.position.set(slot.x, slot.y, slot.z);
-
     scene.add(pen);
     pens.push({ mesh: pen, color });
   });
 });
 
+// ---------- Eraser Holder Tray ----------
+const eraserHolderSize = 1;
+const eraserHolderOffset = { x: -6, z: -3 };
+const eraserHolderGeometry = new THREE.PlaneGeometry(eraserHolderSize, eraserHolderSize);
+const eraserHolderMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000, side: THREE.DoubleSide });
+const eraserHolderSquare = new THREE.Mesh(eraserHolderGeometry, eraserHolderMaterial);
+eraserHolderSquare.rotation.x = -Math.PI / 2;
+eraserHolderSquare.position.set(
+  paper.position.x + eraserHolderOffset.x,
+  paper.position.y + 0.01,
+  paper.position.z + eraserHolderOffset.z
+);
+scene.add(eraserHolderSquare);
+
 // ---------- Load Eraser ----------
 loader.load('/eraser.glb', gltf => {
   eraserMesh = gltf.scene;
-  eraserMesh.position.set(6, 0.2, 0); // beside paper
-  eraserMesh.scale.set(-0.006, -0.006, -0.01);
-  eraserOriginalPos.copy(eraserMesh.position);
+  eraserMesh.scale.set(0.008, 0.006, 0.02); // your scaling
+  eraserOriginalPos.set(
+    eraserHolderSquare.position.x,
+    eraserHolderSquare.position.y + 0.19,
+    eraserHolderSquare.position.z - 0.15
+  );
+  eraserMesh.position.copy(eraserOriginalPos);
   scene.add(eraserMesh);
 });
 
@@ -131,31 +146,33 @@ renderer.domElement.addEventListener('pointerdown', event => {
   mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
   raycaster.setFromCamera(mouse, camera);
-  const objects = [...pens.map(p => p.mesh), holderMesh, eraserMesh].filter(Boolean);
+  const objects = [...pens.map(p => p.mesh), holderMesh, eraserMesh, eraserHolderSquare].filter(Boolean);
   const intersects = raycaster.intersectObjects(objects, true);
 
   if (intersects.length > 0) {
     const obj = intersects[0].object;
 
-    // Toggle eraser
-    if (eraserMesh && (obj === eraserMesh || eraserMesh.getObjectById(obj.id)) && !activePen) {
+    // Toggle eraser only if clicked on tray or eraser itself
+    if (eraserMesh && (obj === eraserMesh || obj === eraserHolderSquare || eraserMesh.getObjectById(obj.id)) && !activePen) {
       eraserMode = !eraserMode;
       console.log(`Eraser mode: ${eraserMode}`);
 
       if (!eraserMode) {
-        // Return eraser to original holder spot
+        // Return eraser to tray
         gsap.to(eraserMesh.position, {
           x: eraserOriginalPos.x,
           y: eraserOriginalPos.y,
           z: eraserOriginalPos.z,
           duration: 0.5,
-          ease: "power2.inOut"
+          ease: "power2.inOut",
+          rotationX: 0,
+          rotationZ: 0
         });
       }
+      return; // prevent picking pens while erasing
     }
 
-    // Disable pen selection while erasing
-    if (eraserMode) return;
+    if (eraserMode) return; // cannot pick pen while erasing
 
     // Pen pick/return logic
     const penData = getRootPen(obj);
@@ -208,11 +225,12 @@ window.addEventListener('pointermove', event => {
       drawCtx.arc(x, y, 3, 0, Math.PI * 2);
       drawCtx.fill();
 
-      // Pen follows pointer with slight lean
-      gsap.to(activePen.mesh.position, { x: p.x, y: p.y + 0.1, z: p.z, duration: 0.1 });
+      // Pen follows pointer with dynamic lean
+      gsap.to(activePen.mesh.position, { x: p.x, y: p.y + 0.1, z: p.z, duration: 0.05 });
       activePen.mesh.lookAt(paper.position);
-      activePen.mesh.rotation.x = 0.15; // tilt forward slightly
-      activePen.mesh.rotation.z = 0.05; // small twist
+      // Tilt dynamically based on movement direction
+      activePen.mesh.rotation.x = Math.sin(Date.now() * 0.005) * 0.05 + 0.1;
+      activePen.mesh.rotation.z = Math.cos(Date.now() * 0.005) * 0.05;
     } else if (eraserMode && eraserMesh) {
       // Erase
       drawCtx.fillStyle = '#fff';
@@ -220,10 +238,11 @@ window.addEventListener('pointermove', event => {
       drawCtx.arc(x, y, 20, 0, Math.PI * 2);
       drawCtx.fill();
 
-      // Stick eraser above paper with slight tilt
-      const paperTopY = paper.position.y + 0.1;
-      gsap.to(eraserMesh.position, { x: p.x, y: paperTopY, z: p.z, duration: 0.05 });
-      eraserMesh.rotation.x = -0.1; // tilt naturally while erasing
+      // Stick eraser above paper
+      const paperTopY = paper.position.y + 0.25;
+      gsap.to(eraserMesh.position, { x: p.x, y: paperTopY, z: p.z, duration: 0.02 });
+      // Tilt naturally while erasing
+      eraserMesh.rotation.x = -0.1;
       eraserMesh.rotation.z = 0.05;
     }
 
