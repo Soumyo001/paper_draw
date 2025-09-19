@@ -221,7 +221,9 @@ renderer.domElement.addEventListener('pointerup', () => {
   }
 });
 
-// ---------- Drawing / Erasing ----------
+// ---------- Drawing / Erasing with Smoothing ----------
+const smoothedPos = new THREE.Vector3();
+
 window.addEventListener('pointermove', event => {
   if (!isDrawing) return;
 
@@ -236,12 +238,15 @@ window.addEventListener('pointermove', event => {
   const uv = intersects[0].uv;
 
   if (activePen) {
-    // Calculate speed
-    const distance = lastPointerPos.pos.distanceTo(p);
-    const speed = distance / 0.016; // approx per frame
-    const radius = THREE.MathUtils.clamp(6 / (speed + 1), 1.5, 4); // faster = thinner
+    // --------- Pen smoothing (lag) ---------
+    smoothedPos.lerpVectors(smoothedPos.length() === 0 ? p : smoothedPos, p, 0.2); // 0.2 = smoothing factor
 
-    // Interpolate between last UV and current UV for solid line
+    // Speed & variable pen size
+    const distance = lastPointerPos.pos.distanceTo(smoothedPos);
+    const speed = distance / 0.016;
+    const radius = THREE.MathUtils.clamp(6 / (speed + 1), 1.5, 4);
+
+    // Solid line interpolation between last UV and current UV
     const steps = Math.ceil(lastPointerPos.uv.distanceTo(uv) * drawCanvas.width * 2);
     for (let i = 0; i <= steps; i++) {
       const t = i / steps;
@@ -256,12 +261,12 @@ window.addEventListener('pointermove', event => {
       drawCtx.fill();
     }
 
-    // Pen follow
-    gsap.to(activePen.mesh.position, { x: p.x, y: p.y + 0.1, z: p.z, duration: 0.05 });
+    // Pen follow smoothed position
+    gsap.to(activePen.mesh.position, { x: smoothedPos.x, y: smoothedPos.y + 0.1, z: smoothedPos.z, duration: 0.05 });
     activePen.mesh.lookAt(paper.position);
 
     // Tilt + wobble
-    const delta = new THREE.Vector3().subVectors(p, lastPointerPos.pos);
+    const delta = new THREE.Vector3().subVectors(smoothedPos, lastPointerPos.pos);
     activePen.mesh.rotation.x = 0.1 + delta.z * 0.2 + (Math.random() - 0.5) * penFlex.maxWobble;
     activePen.mesh.rotation.z = -delta.x * 0.2 + (Math.random() - 0.5) * penFlex.maxWobble;
 
@@ -275,7 +280,7 @@ window.addEventListener('pointermove', event => {
       ease: "power2.out"
     });
 
-    lastPointerPos.pos.copy(p);
+    lastPointerPos.pos.copy(smoothedPos);
     lastPointerPos.uv = uv.clone();
   } else if (eraserMode && eraserMesh) {
     const radius = 20;
@@ -294,6 +299,51 @@ window.addEventListener('pointermove', event => {
   }
 
   drawTexture.needsUpdate = true;
+});
+
+// ---------- Full Page Refresh Button ----------
+const clearBtn = document.createElement('button');
+clearBtn.innerText = 'Clear Canvas';
+clearBtn.style.position = 'absolute';
+clearBtn.style.top = '10px';
+clearBtn.style.right = '10px';
+clearBtn.style.padding = '10px 15px';
+clearBtn.style.fontSize = '16px';
+clearBtn.style.zIndex = '1000';
+document.body.appendChild(clearBtn);
+
+clearBtn.addEventListener('click', () => {
+  // Clear canvas
+  drawCtx.fillStyle = '#fff';
+  drawCtx.fillRect(0, 0, drawCanvas.width, drawCanvas.height);
+  drawTexture.needsUpdate = true;
+
+  // Reset pen positions
+  pens.forEach((p, i) => {
+    const slot = slotPosition(i, pens.length);
+    gsap.to(p.mesh.position, {
+      x: slot.x,
+      y: slot.y,
+      z: slot.z,
+      duration: 0.5,
+      ease: "power2.inOut"
+    });
+  });
+
+  // Reset eraser
+  if (eraserMesh) {
+    gsap.to(eraserMesh.position, {
+      x: eraserOriginalPos.x,
+      y: eraserOriginalPos.y,
+      z: eraserOriginalPos.z,
+      duration: 0.5,
+      ease: "power2.inOut"
+    });
+    eraserMode = false;
+  }
+
+  activePen = null;
+  lastPointerPos = null;
 });
 
 // ---------- Animate ----------
