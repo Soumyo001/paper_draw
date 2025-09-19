@@ -33,7 +33,7 @@ const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
 dirLight.position.set(5, 10, 7);
 scene.add(dirLight);
 
-// ---------- Assets Loader ----------
+// ---------- Loader ----------
 const loader = new GLTFLoader();
 const textureLoader = new THREE.TextureLoader();
 
@@ -150,7 +150,10 @@ const drawTexture = new THREE.CanvasTexture(drawCanvas);
 paper.material.map = drawTexture;
 
 let isDrawing = false;
-let lastPointerPos = new THREE.Vector3();
+let lastPointerPos = null;
+
+// ---------- Pen Flex / Wobble ----------
+const penFlex = { maxCompress: 0.05, speed: 0.1, maxWobble: 0.05 };
 
 // ---------- Pointer Events ----------
 renderer.domElement.addEventListener('pointerdown', event => {
@@ -166,10 +169,7 @@ renderer.domElement.addEventListener('pointerdown', event => {
     // Toggle eraser
     if (eraserMesh && (obj === eraserMesh || obj === eraserHolderSquare || eraserMesh.getObjectById(obj.id)) && !activePen) {
       eraserMode = !eraserMode;
-      console.log(`Eraser mode: ${eraserMode}`);
-
       if (!eraserMode) {
-        // Return eraser to tray
         gsap.to(eraserMesh.position, {
           x: eraserOriginalPos.x,
           y: eraserOriginalPos.y,
@@ -180,12 +180,11 @@ renderer.domElement.addEventListener('pointerdown', event => {
           rotationZ: 0
         });
       }
-      return; // prevent picking pens while erasing
+      return;
     }
 
-    if (eraserMode) return; // cannot pick pen while erasing
+    if (eraserMode) return;
 
-    // Pen pick/return logic
     const penData = getRootPen(obj);
     const isHolderClicked = holderMesh && (obj === holderMesh || holderMesh.getObjectById(obj.id));
 
@@ -205,16 +204,24 @@ renderer.domElement.addEventListener('pointerdown', event => {
     }
   }
 
-  // Start drawing/erasing if clicking paper
   const paperIntersects = raycaster.intersectObject(paper);
   if (paperIntersects.length > 0 && (activePen || eraserMode)) {
     isDrawing = true;
+    lastPointerPos = {
+      pos: paperIntersects[0].point.clone(),
+      uv: paperIntersects[0].uv.clone()
+    };
   }
 });
 
-renderer.domElement.addEventListener('pointerup', () => { isDrawing = false; });
+renderer.domElement.addEventListener('pointerup', () => {
+  isDrawing = false;
+  if (activePen) {
+    gsap.to(activePen.mesh.scale, { x: 0.3, y: 0.3, z: 0.3, duration: 0.2, ease: "power2.out" });
+  }
+});
 
-// ---------- Mouse Move for Drawing / Erasing ----------
+// ---------- Drawing / Erasing ----------
 window.addEventListener('pointermove', event => {
   if (!isDrawing) return;
 
@@ -223,47 +230,70 @@ window.addEventListener('pointermove', event => {
 
   raycaster.setFromCamera(mouse, camera);
   const intersects = raycaster.intersectObject(paper);
-  if (intersects.length > 0) {
-    const p = intersects[0].point;
-    const uv = intersects[0].uv;
-    const x = uv.x * drawCanvas.width;
-    const y = (1 - uv.y) * drawCanvas.height;
+  if (intersects.length === 0) return;
 
-    if (activePen) {
-      // Draw
+  const p = intersects[0].point;
+  const uv = intersects[0].uv;
+
+  if (activePen) {
+    // Calculate speed
+    const distance = lastPointerPos.pos.distanceTo(p);
+    const speed = distance / 0.016; // approx per frame
+    const radius = THREE.MathUtils.clamp(6 / (speed + 1), 1.5, 4); // faster = thinner
+
+    // Interpolate between last UV and current UV for solid line
+    const steps = Math.ceil(lastPointerPos.uv.distanceTo(uv) * drawCanvas.width * 2);
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const interpU = lastPointerPos.uv.x + (uv.x - lastPointerPos.uv.x) * t;
+      const interpV = lastPointerPos.uv.y + (uv.y - lastPointerPos.uv.y) * t;
+      const px = interpU * drawCanvas.width;
+      const py = (1 - interpV) * drawCanvas.height;
+
       drawCtx.fillStyle = activePen.color;
       drawCtx.beginPath();
-      drawCtx.arc(x, y, 3, 0, Math.PI * 2);
+      drawCtx.arc(px, py, radius, 0, Math.PI * 2);
       drawCtx.fill();
-
-      // Smooth pen follow
-      gsap.to(activePen.mesh.position, { x: p.x, y: p.y + 0.1, z: p.z, duration: 0.05 });
-      activePen.mesh.lookAt(paper.position);
-
-      // Dynamic tilt based on movement
-      const delta = new THREE.Vector3().subVectors(p, lastPointerPos);
-      activePen.mesh.rotation.x = 0.1 + delta.y * 0.1;
-      activePen.mesh.rotation.z = delta.x * -0.1;
-      lastPointerPos.copy(p);
-
-    } 
-    else if (eraserMode && eraserMesh) {
-      drawCtx.fillStyle = '#fff';
-      drawCtx.beginPath();
-      drawCtx.arc(x, y, 20, 0, Math.PI * 2);
-      drawCtx.fill();
-
-      // Smooth eraser follow
-      const paperTopY = paper.position.y + 0.25;
-      gsap.to(eraserMesh.position, { x: p.x, y: paperTopY, z: p.z, duration: 0.02 });
-
-      // Natural tilt
-      eraserMesh.rotation.x = -0.1;
-      eraserMesh.rotation.z = 0.05;
     }
 
-    drawTexture.needsUpdate = true;
+    // Pen follow
+    gsap.to(activePen.mesh.position, { x: p.x, y: p.y + 0.1, z: p.z, duration: 0.05 });
+    activePen.mesh.lookAt(paper.position);
+
+    // Tilt + wobble
+    const delta = new THREE.Vector3().subVectors(p, lastPointerPos.pos);
+    activePen.mesh.rotation.x = 0.1 + delta.z * 0.2 + (Math.random() - 0.5) * penFlex.maxWobble;
+    activePen.mesh.rotation.z = -delta.x * 0.2 + (Math.random() - 0.5) * penFlex.maxWobble;
+
+    // Pen flex
+    const compressAmount = penFlex.maxCompress;
+    gsap.to(activePen.mesh.scale, {
+      y: 0.3 - compressAmount,
+      x: 0.3 + compressAmount / 2,
+      z: 0.3 + compressAmount / 2,
+      duration: penFlex.speed,
+      ease: "power2.out"
+    });
+
+    lastPointerPos.pos.copy(p);
+    lastPointerPos.uv = uv.clone();
+  } else if (eraserMode && eraserMesh) {
+    const radius = 20;
+    const px = uv.x * drawCanvas.width;
+    const py = (1 - uv.y) * drawCanvas.height;
+
+    drawCtx.fillStyle = '#fff';
+    drawCtx.beginPath();
+    drawCtx.arc(px, py, radius, 0, Math.PI * 2);
+    drawCtx.fill();
+
+    const paperTopY = paper.position.y + 0.25;
+    gsap.to(eraserMesh.position, { x: p.x, y: paperTopY, z: p.z, duration: 0.02 });
+    eraserMesh.rotation.x = -0.1;
+    eraserMesh.rotation.z = 0.05;
   }
+
+  drawTexture.needsUpdate = true;
 });
 
 // ---------- Animate ----------
@@ -274,7 +304,7 @@ function animate() {
 }
 animate();
 
-// ---------- Window Resize ----------
+// ---------- Resize ----------
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
