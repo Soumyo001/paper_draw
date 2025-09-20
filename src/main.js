@@ -50,66 +50,96 @@ scene.add(paper);
 const layers = [];
 let activeLayerIndex = 0;
 
-function createLayer() {
+function createLayer(name = null) {
   const canvas = document.createElement('canvas');
   canvas.width = 1024;
   canvas.height = 1024;
   const ctx = canvas.getContext('2d');
+  // Start with white background
   ctx.fillStyle = '#fff';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   const texture = new THREE.CanvasTexture(canvas);
-  layers.push({ canvas, ctx, texture });
+  const layer = { canvas, ctx, texture, name: name || `Layer ${layers.length + 1}` };
+  layers.push(layer);
   return layers.length - 1;
 }
 
 function deleteLayer(index) {
-  if (layers.length <= 1) return; // At least one layer must remain
+  if (layers.length <= 1) return;
   layers.splice(index, 1);
   if (activeLayerIndex >= layers.length) activeLayerIndex = layers.length - 1;
   paper.material.map = layers[activeLayerIndex].texture;
-  updateLayerButtons();
+  refreshLayerUI();
 }
 
-// Default: create 5 layers
+// init with 5 layers as before
 for (let i = 0; i < 5; i++) createLayer();
 paper.material.map = layers[activeLayerIndex].texture;
 
-// Layer UI
+// ---------- Layer UI (dynamic add/delete + highlight) ----------
 const layerContainer = document.createElement('div');
 layerContainer.style.position = 'absolute';
 layerContainer.style.top = '10px';
 layerContainer.style.left = '10px';
 layerContainer.style.zIndex = '1000';
+layerContainer.style.fontFamily = 'sans-serif';
 document.body.appendChild(layerContainer);
 
-function updateLayerButtons() {
+function refreshLayerUI() {
   layerContainer.innerHTML = '';
-  layers.forEach((_, i) => {
+  layers.forEach((layer, i) => {
+    const wrapper = document.createElement('div');
+    wrapper.style.display = 'flex';
+    wrapper.style.alignItems = 'center';
+    wrapper.style.marginBottom = '6px';
+
     const btn = document.createElement('button');
-    btn.innerText = `Layer ${i + 1}`;
-    btn.style.marginRight = '5px';
+    btn.innerText = layer.name;
+    btn.style.marginRight = '6px';
+    btn.style.padding = '6px';
+    btn.style.background = (i === activeLayerIndex) ? '#d0d0d0' : '#fff';
     btn.addEventListener('click', () => {
       activeLayerIndex = i;
       paper.material.map = layers[activeLayerIndex].texture;
+      refreshLayerUI();
     });
-    layerContainer.appendChild(btn);
+    wrapper.appendChild(btn);
 
     const delBtn = document.createElement('button');
-    delBtn.innerText = 'X';
-    delBtn.style.marginRight = '10px';
-    delBtn.addEventListener('click', () => deleteLayer(i));
-    layerContainer.appendChild(delBtn);
+    delBtn.innerText = '🗑';
+    delBtn.title = 'Delete layer';
+    delBtn.style.marginRight = '6px';
+    delBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      deleteLayer(i);
+    });
+    wrapper.appendChild(delBtn);
+
+    const rename = document.createElement('input');
+    rename.value = layer.name;
+    rename.style.width = '120px';
+    rename.addEventListener('input', () => {
+      layer.name = rename.value;
+      btn.innerText = layer.name;
+    });
+    wrapper.appendChild(rename);
+
+    layerContainer.appendChild(wrapper);
   });
 
   const addBtn = document.createElement('button');
   addBtn.innerText = '+ Add Layer';
+  addBtn.style.display = 'block';
+  addBtn.style.marginTop = '6px';
   addBtn.addEventListener('click', () => {
-    createLayer();
-    updateLayerButtons();
+    const idx = createLayer();
+    activeLayerIndex = idx;
+    paper.material.map = layers[activeLayerIndex].texture;
+    refreshLayerUI();
   });
   layerContainer.appendChild(addBtn);
 }
-updateLayerButtons();
+refreshLayerUI();
 
 // ---------- Pen Holder ----------
 let holderMesh;
