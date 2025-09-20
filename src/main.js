@@ -417,54 +417,142 @@ window.addEventListener('pointermove', event => {
   layer.texture.needsUpdate = true;
 });
 
-// ---------- Clear Canvas ----------
+// ---------- Tools Panel ----------
+const toolsPanel = document.createElement('div');
+toolsPanel.style.position = 'absolute';
+toolsPanel.style.top = '10px';
+toolsPanel.style.right = '10px';
+toolsPanel.style.padding = '12px';
+toolsPanel.style.background = 'rgba(30,30,30,0.85)';
+toolsPanel.style.borderRadius = '10px';
+toolsPanel.style.boxShadow = '0 4px 12px rgba(0,0,0,0.4)';
+toolsPanel.style.fontFamily = 'sans-serif';
+toolsPanel.style.color = 'white';
+toolsPanel.style.zIndex = '1000';
+toolsPanel.style.minWidth = '180px';
+document.body.appendChild(toolsPanel);
+
+// ----- Title -----
+const title = document.createElement('div');
+title.innerText = 'Tools';
+title.style.fontSize = '18px';
+title.style.fontWeight = 'bold';
+title.style.marginBottom = '10px';
+toolsPanel.appendChild(title);
+
+// ----- Clear Current Layer -----
 const clearBtn = document.createElement('button');
 clearBtn.innerText = 'Clear Current Layer';
-clearBtn.style.position = 'absolute';
-clearBtn.style.top = '50px';
-clearBtn.style.right = '10px';
-clearBtn.style.padding = '10px 15px';
-clearBtn.style.fontSize = '16px';
-clearBtn.style.zIndex = '1000';
-document.body.appendChild(clearBtn);
+clearBtn.style.width = '100%';
+clearBtn.style.padding = '8px';
+clearBtn.style.marginBottom = '12px'; // spacing before divider
+clearBtn.style.cursor = 'pointer';
+clearBtn.style.border = 'none';
+clearBtn.style.borderRadius = '6px';
+clearBtn.style.background = '#c0392b';
+clearBtn.style.color = 'white';
+clearBtn.style.fontSize = '14px';
+clearBtn.style.transition = 'background 0.2s';
+clearBtn.onmouseenter = () => clearBtn.style.background = '#e74c3c';
+clearBtn.onmouseleave = () => clearBtn.style.background = '#c0392b';
+toolsPanel.appendChild(clearBtn);
 
 clearBtn.addEventListener('click', () => {
   const layer = layers[activeLayerIndex];
+  if (!layer) return;
   layer.ctx.fillStyle = '#fff';
   layer.ctx.fillRect(0, 0, layer.canvas.width, layer.canvas.height);
   layer.texture.needsUpdate = true;
+});
 
-  // Reset pen positions
-  pens.forEach((p, i) => {
-    const slot = slotPosition(i, pens.length);
-    gsap.to(p.mesh.position, {
-      x: slot.x,
-      y: slot.y,
-      z: slot.z,
-      duration: 0.5,
-      ease: "power2.inOut"
-    });
-  });
+// ----- Divider -----
+const divider = document.createElement('hr');
+divider.style.border = '0';
+divider.style.height = '1px';
+divider.style.background = 'rgba(255,255,255,0.25)';
+divider.style.margin = '8px 0 12px 0';
+toolsPanel.appendChild(divider);
 
-  // Reset eraser
-  if (eraserMesh) {
-    gsap.to(eraserMesh.position, {
-      x: eraserOriginalPos.x,
-      y: eraserOriginalPos.y,
-      z: eraserOriginalPos.z,
-      duration: 0.5,
-      ease: "power2.inOut"
-    });
-    eraserMode = false;
-  }
+// ----- Export Section -----
+const exportTitle = document.createElement('div');
+exportTitle.innerText = 'Export Drawing';
+exportTitle.style.fontSize = '16px';
+exportTitle.style.marginBottom = '6px';
+toolsPanel.appendChild(exportTitle);
 
-  activePen = null;
-  lastPointerPos = null;
+// Format selector
+const formatSelect = document.createElement('select');
+['PNG', 'JPG'].forEach(f => {
+  const opt = document.createElement('option');
+  opt.value = f.toLowerCase();
+  opt.innerText = f;
+  formatSelect.appendChild(opt);
+});
+formatSelect.style.width = '100%';
+formatSelect.style.padding = '6px';
+formatSelect.style.marginBottom = '8px';
+formatSelect.style.borderRadius = '6px';
+formatSelect.style.border = 'none';
+formatSelect.style.fontSize = '14px';
+toolsPanel.appendChild(formatSelect);
+
+// Scale selector
+const scaleSelect = document.createElement('select');
+[1, 2, 3, 4].forEach(s => {
+  const opt = document.createElement('option');
+  opt.value = s;
+  opt.innerText = `x${s}`;
+  scaleSelect.appendChild(opt);
+});
+scaleSelect.style.width = '100%';
+scaleSelect.style.padding = '6px';
+scaleSelect.style.marginBottom = '10px';
+scaleSelect.style.borderRadius = '6px';
+scaleSelect.style.border = 'none';
+scaleSelect.style.fontSize = '14px';
+toolsPanel.appendChild(scaleSelect);
+
+// Export button
+const exportBtn = document.createElement('button');
+exportBtn.innerText = 'Export Layer';
+exportBtn.style.width = '100%';
+exportBtn.style.padding = '8px';
+exportBtn.style.cursor = 'pointer';
+exportBtn.style.border = 'none';
+exportBtn.style.borderRadius = '6px';
+exportBtn.style.background = '#27ae60';
+exportBtn.style.color = 'white';
+exportBtn.style.fontSize = '14px';
+exportBtn.style.transition = 'background 0.2s';
+exportBtn.onmouseenter = () => exportBtn.style.background = '#2ecc71';
+exportBtn.onmouseleave = () => exportBtn.style.background = '#27ae60';
+toolsPanel.appendChild(exportBtn);
+
+exportBtn.addEventListener('click', () => {
+  const layer = layers[activeLayerIndex];
+  if (!layer) return;
+
+  const format = formatSelect.value;
+  const scale = parseInt(scaleSelect.value);
+
+  const exportCanvas = document.createElement('canvas');
+  exportCanvas.width = layer.canvas.width * scale;
+  exportCanvas.height = layer.canvas.height * scale;
+  const ctx = exportCanvas.getContext('2d');
+  ctx.drawImage(layer.canvas, 0, 0, exportCanvas.width, exportCanvas.height);
+
+  const mime = format === 'png' ? 'image/png' : 'image/jpeg';
+  const imageData = exportCanvas.toDataURL(mime, 1.0);
+
+  const link = document.createElement('a');
+  link.href = imageData;
+  link.download = `${layer.name.replace(/\s+/g, '_')}.${format}`;
+  link.click();
 });
 
 // ---------- Floating Holographic Text ----------
 let floatingText = null;
-let leanAngle = -15; // default lean in degrees, negative = lean right
+let leanAngle = 10; // default lean in degrees, negative = lean right
 
 fontLoader.load('/fonts/helvetiker_regular.typeface.json', font => {
   const createText = (angleDeg = leanAngle) => {
@@ -508,7 +596,7 @@ fontLoader.load('/fonts/helvetiker_regular.typeface.json', font => {
 
     floatingText = new THREE.Mesh(textGeo, textMaterial);
     floatingText.scale.set(-1, 1, 0.01);
-    floatingText.position.set(-4 - width / 2, 7.5 - height / 2, 4);
+    floatingText.position.set(-4 - width / 2, 7 - height / 2, 4);
     floatingText.rotation.y = -1.5;
 
     scene.add(floatingText);
