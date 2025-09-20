@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
+import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
 import gsap from 'gsap';
 
 // ---------- Scene, Camera, Renderer ----------
@@ -36,6 +38,7 @@ scene.add(dirLight);
 // ---------- Loader ----------
 const loader = new GLTFLoader();
 const textureLoader = new THREE.TextureLoader();
+const fontLoader = new FontLoader();
 
 // ---------- Paper ----------
 const paperTexture = textureLoader.load('/paper.jpg');
@@ -457,6 +460,68 @@ clearBtn.addEventListener('click', () => {
 
   activePen = null;
   lastPointerPos = null;
+});
+
+// ---------- Floating Holographic Text ----------
+let floatingText = null;
+let leanAngle = -15; // default lean in degrees, negative = lean right
+
+fontLoader.load('/fonts/helvetiker_regular.typeface.json', font => {
+  const createText = (angleDeg = leanAngle) => {
+    // Remove previous text
+    if (floatingText) scene.remove(floatingText);
+
+    const textGeo = new TextGeometry('Pen & Paper', {
+      font: font,
+      size: 1.2,
+      height: 0.2,
+      curveSegments: 12,
+      bevelEnabled: true,
+      bevelThickness: 0.03,
+      bevelSize: 0.02,
+      bevelSegments: 5
+    });
+
+    // Apply italic shear
+    const angleRad = angleDeg * Math.PI / 180;
+    const italicMatrix = new THREE.Matrix4().set(
+      1, 0, 0, 0,
+      Math.tan(angleRad), 1, 0, 0, // shear X
+      0, 0, 1, 0,
+      0, 0, 0, 1
+    );
+    textGeo.applyMatrix4(italicMatrix);
+
+    // Center geometry
+    textGeo.computeBoundingBox();
+    const bbox = textGeo.boundingBox;
+    const width = bbox.max.x - bbox.min.x;
+    const height = bbox.max.y - bbox.min.y;
+
+    const textMaterial = new THREE.MeshStandardMaterial({
+      color: 0xd9d9d9,
+      emissive: 0xd9d9d9,
+      emissiveIntensity: 0,
+      metalness: 1,
+      roughness: 1
+    });
+
+    floatingText = new THREE.Mesh(textGeo, textMaterial);
+    floatingText.scale.set(-1, 1, 0.01);
+    floatingText.position.set(-4 - width / 2, 7.5 - height / 2, 4);
+    floatingText.rotation.y = -1.5;
+
+    scene.add(floatingText);
+  };
+
+  createText();
+
+  // Optional: listen for keyboard input to adjust lean dynamically
+  window.addEventListener('keydown', e => {
+    if (e.key === 'ArrowLeft') leanAngle -= 1;
+    if (e.key === 'ArrowRight') leanAngle += 1;
+    createText(leanAngle);
+  });
 });
 
 // ---------- Animate ----------
