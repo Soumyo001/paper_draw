@@ -65,14 +65,14 @@ function createLayer(name = null) {
 }
 
 function deleteLayer(index) {
-  if (layers.length <= 1) return;
+  if (layers.length <= 1) return; // At least one layer must remain
   layers.splice(index, 1);
   if (activeLayerIndex >= layers.length) activeLayerIndex = layers.length - 1;
   paper.material.map = layers[activeLayerIndex].texture;
   refreshLayerUI();
 }
 
-// init with 5 layers as before
+// Default: create 5 layers
 for (let i = 0; i < 5; i++) createLayer();
 paper.material.map = layers[activeLayerIndex].texture;
 
@@ -148,6 +148,7 @@ loader.load('/pen_holder2.glb', gltf => {
   holderMesh.position.set(-6, 0, 0);
   holderMesh.scale.set(8, 8, 8);
   scene.add(holderMesh);
+  updateInteractables(); // ensure holder is in interactables
 });
 
 // ---------- Pens ----------
@@ -252,10 +253,11 @@ renderer.domElement.addEventListener('pointerdown', event => {
   if (intersects.length > 0) {
     const obj = intersects[0].object;
 
-    // Toggle eraser
+    // Toggle eraser only if clicked on eraser or tray (and no pen in hand)
     if (eraserMesh && (obj === eraserMesh || obj === eraserHolderSquare || eraserMesh.getObjectById(obj.id)) && !activePen) {
       eraserMode = !eraserMode;
       if (!eraserMode) {
+        // return eraser to tray
         gsap.to(eraserMesh.position, {
           x: eraserOriginalPos.x,
           y: eraserOriginalPos.y,
@@ -269,6 +271,7 @@ renderer.domElement.addEventListener('pointerdown', event => {
       return;
     }
 
+    // if eraserMode active and clicking other objects, ignore picking pens
     if (eraserMode) return;
 
     const penData = getRootPen(obj);
@@ -324,13 +327,14 @@ window.addEventListener('pointermove', event => {
   const layer = layers[activeLayerIndex];
 
   if (activePen) {
+    // smoothing
     smoothedPos.lerpVectors(smoothedPos, p, 0.2);
 
     const distance = lastPointerPos.pos.distanceTo(smoothedPos);
     const speed = distance / 0.016;
     const radius = THREE.MathUtils.clamp(6 / (speed + 1), 1.5, 4);
 
-    const steps = Math.ceil(lastPointerPos.uv.distanceTo(uv) * layer.canvas.width * 2);
+    const steps = Math.ceil(lastPointerPos.uv.distanceTo(uv) * layer.canvas.width * 2) || 1;
     for (let i = 0; i <= steps; i++) {
       const t = i / steps;
       const interpU = lastPointerPos.uv.x + (uv.x - lastPointerPos.uv.x) * t;
@@ -338,12 +342,25 @@ window.addEventListener('pointermove', event => {
       const px = interpU * layer.canvas.width;
       const py = (1 - interpV) * layer.canvas.height;
 
-      layer.ctx.fillStyle = activePen.color;
+      // draw with radial gradient to get ink-bleed
+      const bleedRadius = radius;
+      const g = layer.ctx.createRadialGradient(px, py, Math.max(1, bleedRadius * 0.15), px, py, bleedRadius);
+      g.addColorStop(0, activePen.color);
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+
+      const prevOp = layer.ctx.globalCompositeOperation;
+      const prevAlpha = layer.ctx.globalAlpha;
+      layer.ctx.globalCompositeOperation = 'source-over';
+      layer.ctx.globalAlpha = 1.0; // you can modulate alpha if you want pressure-based transparency
+      layer.ctx.fillStyle = g;
       layer.ctx.beginPath();
-      layer.ctx.arc(px, py, radius, 0, Math.PI * 2);
+      layer.ctx.arc(px, py, bleedRadius, 0, Math.PI * 2);
       layer.ctx.fill();
+      layer.ctx.globalAlpha = prevAlpha;
+      layer.ctx.globalCompositeOperation = prevOp;
     }
 
+    // Pen follow smoothed position
     gsap.to(activePen.mesh.position, { x: smoothedPos.x, y: smoothedPos.y + 0.1, z: smoothedPos.z, duration: 0.05 });
     activePen.mesh.lookAt(paper.position);
 
@@ -363,17 +380,33 @@ window.addEventListener('pointermove', event => {
     lastPointerPos.pos.copy(smoothedPos);
     lastPointerPos.uv = uv.clone();
   } else if (eraserMode && eraserMesh) {
+    // Softer eraser: gradually fades ink back to white
     const radius = 20;
     const px = uv.x * layer.canvas.width;
     const py = (1 - uv.y) * layer.canvas.height;
-
+    
+    const prevOp = layer.ctx.globalCompositeOperation;
+    const prevAlpha = layer.ctx.globalAlpha;
+    
+    // Use 'lighter' blending to mix white in softly
+    layer.ctx.globalCompositeOperation = 'lighter';
+    layer.ctx.globalAlpha = 0.15; // low alpha = gradual fade
     layer.ctx.fillStyle = '#fff';
     layer.ctx.beginPath();
     layer.ctx.arc(px, py, radius, 0, Math.PI * 2);
     layer.ctx.fill();
-
+    
+    // restore ctx state
+    layer.ctx.globalAlpha = prevAlpha;
+    layer.ctx.globalCompositeOperation = prevOp;
+    
     const paperTopY = paper.position.y + 0.25;
-    gsap.to(eraserMesh.position, { x: p.x, y: paperTopY, z: p.z, duration: 0.02 });
+    gsap.to(eraserMesh.position, { 
+      x: p.x, 
+      y: paperTopY, 
+      z: p.z, 
+      duration: 0.02 
+    });
     eraserMesh.rotation.x = -0.1;
     eraserMesh.rotation.z = 0.05;
   }
