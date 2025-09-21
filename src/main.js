@@ -41,45 +41,26 @@ const textureLoader = new THREE.TextureLoader();
 const fontLoader = new FontLoader();
 
 // ---------- Paper ----------
-const paperTexture = textureLoader.load('/paper.jpg');
+const paperTexture = textureLoader.load(
+  '/paper.jpg',
+  () => {
+    // Texture finished loading → safe to init layers now
+    for (let i = 0; i < 5; i++) createLayer();
+    updatePaperMaterial();
+    refreshLayerUI();
+  }
+);
+paperTexture.wrapS = paperTexture.wrapT = THREE.RepeatWrapping;
+paperTexture.minFilter = THREE.LinearFilter;
+
 const paper = new THREE.Mesh(
-  new THREE.PlaneGeometry(10, 7),
-  new THREE.MeshStandardMaterial({ map: paperTexture })
+    new THREE.PlaneGeometry(10, 7),
+    new THREE.MeshStandardMaterial({ map: paperTexture })
 );
 paper.rotation.x = -Math.PI / 2;
 scene.add(paper);
 
 // ---------- Layers ----------
-const layers = [];
-let activeLayerIndex = 0;
-
-function createLayer(name = null) {
-  const canvas = document.createElement('canvas');
-  canvas.width = 1024;
-  canvas.height = 1024;
-  const ctx = canvas.getContext('2d');
-  // Start with white background
-  ctx.fillStyle = '#fff';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  const texture = new THREE.CanvasTexture(canvas);
-  const layer = { canvas, ctx, texture, name: name || `Layer ${layers.length + 1}` };
-  layers.push(layer);
-  return layers.length - 1;
-}
-
-function deleteLayer(index) {
-  if (layers.length <= 1) return; // At least one layer must remain
-  layers.splice(index, 1);
-  if (activeLayerIndex >= layers.length) activeLayerIndex = layers.length - 1;
-  paper.material.map = layers[activeLayerIndex].texture;
-  refreshLayerUI();
-}
-
-// Default: create 5 layers
-for (let i = 0; i < 5; i++) createLayer();
-paper.material.map = layers[activeLayerIndex].texture;
-
-// ---------- Layer UI (dynamic add/delete + highlight) ----------
 const layerContainer = document.createElement('div');
 layerContainer.style.position = 'absolute';
 layerContainer.style.top = '10px';
@@ -87,62 +68,110 @@ layerContainer.style.left = '10px';
 layerContainer.style.zIndex = '1000';
 layerContainer.style.fontFamily = 'sans-serif';
 document.body.appendChild(layerContainer);
+const layers = [];
+let activeLayerIndex = 0;
 
-function refreshLayerUI() {
-  layerContainer.innerHTML = '';
-  layers.forEach((layer, i) => {
-    const wrapper = document.createElement('div');
-    wrapper.style.display = 'flex';
-    wrapper.style.alignItems = 'center';
-    wrapper.style.marginBottom = '6px';
+function createLayer(name = null) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1024;
+    canvas.height = 1024;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = 'rgba(0,0,0,0)'; // transparent background for blending
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const texture = new THREE.CanvasTexture(canvas);
+    const layer = { canvas, ctx, texture, name: name || `Layer ${layers.length + 1}` };
+    layers.push(layer);
+    return layers.length - 1;
+}
 
-    const btn = document.createElement('button');
-    btn.innerText = layer.name;
-    btn.style.marginRight = '6px';
-    btn.style.padding = '6px';
-    btn.style.background = (i === activeLayerIndex) ? '#d0d0d0' : '#fff';
-    btn.addEventListener('click', () => {
-      activeLayerIndex = i;
-      paper.material.map = layers[activeLayerIndex].texture;
-      refreshLayerUI();
-    });
-    wrapper.appendChild(btn);
-
-    const delBtn = document.createElement('button');
-    delBtn.innerText = '🗑';
-    delBtn.title = 'Delete layer';
-    delBtn.style.marginRight = '6px';
-    delBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      deleteLayer(i);
-    });
-    wrapper.appendChild(delBtn);
-
-    const rename = document.createElement('input');
-    rename.value = layer.name;
-    rename.style.width = '120px';
-    rename.addEventListener('input', () => {
-      layer.name = rename.value;
-      btn.innerText = layer.name;
-    });
-    wrapper.appendChild(rename);
-
-    layerContainer.appendChild(wrapper);
-  });
-
-  const addBtn = document.createElement('button');
-  addBtn.innerText = '+ Add Layer';
-  addBtn.style.display = 'block';
-  addBtn.style.marginTop = '6px';
-  addBtn.addEventListener('click', () => {
-    const idx = createLayer();
-    activeLayerIndex = idx;
-    paper.material.map = layers[activeLayerIndex].texture;
+function deleteLayer(index) {
+    if (layers.length <= 1) return;
+    layers.splice(index, 1);
+    if (activeLayerIndex >= layers.length) activeLayerIndex = layers.length - 1;
+    updatePaperMaterial();
     refreshLayerUI();
-  });
-  layerContainer.appendChild(addBtn);
+}
+
+// ---------- Layer UI ----------
+function refreshLayerUI() {
+    layerContainer.innerHTML = '';
+    layers.forEach((layer, i) => {
+        const wrapper = document.createElement('div');
+        wrapper.style.display = 'flex';
+        wrapper.style.alignItems = 'center';
+        wrapper.style.marginBottom = '6px';
+
+        const btn = document.createElement('button');
+        btn.innerText = layer.name;
+        btn.style.marginRight = '6px';
+        btn.style.padding = '6px';
+        btn.style.background = (i === activeLayerIndex) ? '#d0d0d0' : '#fff';
+        btn.addEventListener('click', () => {
+            activeLayerIndex = i;
+            updatePaperMaterial();
+            refreshLayerUI();
+        });
+        wrapper.appendChild(btn);
+
+        const delBtn = document.createElement('button');
+        delBtn.innerText = '🗑';
+        delBtn.title = 'Delete layer';
+        delBtn.style.marginRight = '6px';
+        delBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            deleteLayer(i);
+        });
+        wrapper.appendChild(delBtn);
+
+        const rename = document.createElement('input');
+        rename.value = layer.name;
+        rename.style.width = '120px';
+        rename.addEventListener('input', () => {
+            layer.name = rename.value;
+            btn.innerText = layer.name;
+        });
+        wrapper.appendChild(rename);
+
+        layerContainer.appendChild(wrapper);
+    });
+
+    const addBtn = document.createElement('button');
+    addBtn.innerText = '+ Add Layer';
+    addBtn.style.display = 'block';
+    addBtn.style.marginTop = '6px';
+    addBtn.addEventListener('click', () => {
+        const idx = createLayer();
+        activeLayerIndex = idx;
+        updatePaperMaterial();
+        refreshLayerUI();
+    });
+    layerContainer.appendChild(addBtn);
 }
 refreshLayerUI();
+
+// ---------- Combine paper + layer texture ----------
+function getCombinedTexture(layer) {
+    if (!paperTexture.image) return layer.texture; // fallback
+    const canvas = document.createElement('canvas');
+    canvas.width = 1024;
+    canvas.height = 1024;
+    const ctx = canvas.getContext('2d');
+
+    // Draw paper texture
+    ctx.drawImage(paperTexture.image, 0, 0, canvas.width, canvas.height);
+
+    // Draw layer strokes on top
+    ctx.drawImage(layer.canvas, 0, 0, canvas.width, canvas.height);
+
+    return new THREE.CanvasTexture(canvas);
+}
+
+function updatePaperMaterial() {
+    if (!layers || layers.length === 0) return;
+    const layer = layers[activeLayerIndex];
+    paper.material.map = getCombinedTexture(layer);
+    paper.material.needsUpdate = true;
+}
 
 // ---------- Pen Holder ----------
 let holderMesh;
@@ -262,13 +291,17 @@ renderer.domElement.addEventListener('pointerdown', event => {
       if (!eraserMode) {
         // return eraser to tray
         gsap.to(eraserMesh.position, {
-          x: eraserOriginalPos.x,
-          y: eraserOriginalPos.y,
-          z: eraserOriginalPos.z,
-          duration: 0.5,
-          ease: "power2.inOut",
-          rotationX: 0,
-          rotationZ: 0
+            x: eraserOriginalPos.x,
+            y: eraserOriginalPos.y,
+            z: eraserOriginalPos.z,
+            duration: 0.5,
+            ease: "power2.inOut"
+        });
+        gsap.to(eraserMesh.rotation, {
+            x: 0,
+            z: 0,
+            duration: 0.5,
+            ease: "power2.inOut"
         });
       }
       return;
@@ -315,106 +348,86 @@ renderer.domElement.addEventListener('pointerup', () => {
 });
 
 // ---------- Drawing / Erasing ----------
-window.addEventListener('pointermove', event => {
-  if (!isDrawing) return;
+renderer.domElement.addEventListener('pointermove', event => {
+    if (!isDrawing) return;
 
-  mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-  mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+    mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
-  raycaster.setFromCamera(mouse, camera);
-  const intersects = raycaster.intersectObject(paper);
-  if (intersects.length === 0) return;
+    raycaster.setFromCamera(mouse, camera);
+    const intersects = raycaster.intersectObject(paper);
+    if (intersects.length === 0) return;
 
-  const p = intersects[0].point;
-  const uv = intersects[0].uv;
-  const layer = layers[activeLayerIndex];
+    const p = intersects[0].point;
+    const uv = intersects[0].uv;
+    const layer = layers[activeLayerIndex];
 
-  if (activePen) {
-    // smoothing
-    smoothedPos.lerpVectors(smoothedPos, p, 0.2);
+    if (activePen) {
+        // smoothing
+        smoothedPos.lerpVectors(smoothedPos, p, 0.2);
 
-    const distance = lastPointerPos.pos.distanceTo(smoothedPos);
-    const speed = distance / 0.016;
-    const radius = THREE.MathUtils.clamp(6 / (speed + 1), 1.5, 4);
+        const distance = lastPointerPos.pos.distanceTo(smoothedPos);
+        const speed = distance / 0.016;
+        const radius = THREE.MathUtils.clamp(6 / (speed + 1), 1.5, 4);
 
-    const steps = Math.ceil(lastPointerPos.uv.distanceTo(uv) * layer.canvas.width * 2) || 1;
-    for (let i = 0; i <= steps; i++) {
-      const t = i / steps;
-      const interpU = lastPointerPos.uv.x + (uv.x - lastPointerPos.uv.x) * t;
-      const interpV = lastPointerPos.uv.y + (uv.y - lastPointerPos.uv.y) * t;
-      const px = interpU * layer.canvas.width;
-      const py = (1 - interpV) * layer.canvas.height;
+        const steps = Math.ceil(lastPointerPos.uv.distanceTo(uv) * layer.canvas.width * 2) || 1;
+        for (let i = 0; i <= steps; i++) {
+            const t = i / steps;
+            const interpU = lastPointerPos.uv.x + (uv.x - lastPointerPos.uv.x) * t;
+            const interpV = lastPointerPos.uv.y + (uv.y - lastPointerPos.uv.y) * t;
+            const px = interpU * layer.canvas.width;
+            const py = (1 - interpV) * layer.canvas.height;
 
-      // draw with radial gradient to get ink-bleed
-      const bleedRadius = radius;
-      const g = layer.ctx.createRadialGradient(px, py, Math.max(1, bleedRadius * 0.15), px, py, bleedRadius);
-      g.addColorStop(0, activePen.color);
-      g.addColorStop(1, 'rgba(0,0,0,0)');
+            const bleedRadius = radius;
+            const g = layer.ctx.createRadialGradient(px, py, Math.max(1, bleedRadius * 0.15), px, py, bleedRadius);
+            g.addColorStop(0, activePen.color);
+            g.addColorStop(1, 'rgba(0,0,0,0)');
 
-      const prevOp = layer.ctx.globalCompositeOperation;
-      const prevAlpha = layer.ctx.globalAlpha;
-      layer.ctx.globalCompositeOperation = 'source-over';
-      layer.ctx.globalAlpha = 1.0; // you can modulate alpha if you want pressure-based transparency
-      layer.ctx.fillStyle = g;
-      layer.ctx.beginPath();
-      layer.ctx.arc(px, py, bleedRadius, 0, Math.PI * 2);
-      layer.ctx.fill();
-      layer.ctx.globalAlpha = prevAlpha;
-      layer.ctx.globalCompositeOperation = prevOp;
+            const prevOp = layer.ctx.globalCompositeOperation;
+            const prevAlpha = layer.ctx.globalAlpha;
+            layer.ctx.globalCompositeOperation = 'source-over';
+            layer.ctx.globalAlpha = 1.0;
+            layer.ctx.fillStyle = g;
+            layer.ctx.beginPath();
+            layer.ctx.arc(px, py, bleedRadius, 0, Math.PI * 2);
+            layer.ctx.fill();
+            layer.ctx.globalAlpha = prevAlpha;
+            layer.ctx.globalCompositeOperation = prevOp;
+        }
+
+        gsap.to(activePen.mesh.position, { x: smoothedPos.x, y: smoothedPos.y + 0.1, z: smoothedPos.z, duration: 0.05 });
+        activePen.mesh.lookAt(paper.position);
+
+        const delta = new THREE.Vector3().subVectors(smoothedPos, lastPointerPos.pos);
+        activePen.mesh.rotation.x = 0.1 + delta.z * 0.2 + (Math.random() - 0.5) * penFlex.maxWobble;
+        activePen.mesh.rotation.z = -delta.x * 0.2 + (Math.random() - 0.5) * penFlex.maxWobble;
+
+        const compressAmount = penFlex.maxCompress;
+        gsap.to(activePen.mesh.scale, {
+            y: 0.3 - compressAmount,
+            x: 0.3 + compressAmount / 2,
+            z: 0.3 + compressAmount / 2,
+            duration: penFlex.speed,
+            ease: "power2.out"
+        });
+
+        lastPointerPos.pos.copy(smoothedPos);
+        lastPointerPos.uv = uv.clone();
+    } else if (eraserMode && eraserMesh) {
+        const radius = 20;
+        const px = uv.x * layer.canvas.width;
+        const py = (1 - uv.y) * layer.canvas.height;
+        
+        layer.ctx.clearRect(px - radius, py - radius, radius * 2, radius * 2);
+        layer.texture.needsUpdate = true;
+        updatePaperMaterial(); 
+        
+        const paperTopY = paper.position.y + 0.25;
+        gsap.to(eraserMesh.position, { x: p.x, y: paperTopY, z: p.z, duration: 0.02 });
     }
 
-    // Pen follow smoothed position
-    gsap.to(activePen.mesh.position, { x: smoothedPos.x, y: smoothedPos.y + 0.1, z: smoothedPos.z, duration: 0.05 });
-    activePen.mesh.lookAt(paper.position);
-
-    const delta = new THREE.Vector3().subVectors(smoothedPos, lastPointerPos.pos);
-    activePen.mesh.rotation.x = 0.1 + delta.z * 0.2 + (Math.random() - 0.5) * penFlex.maxWobble;
-    activePen.mesh.rotation.z = -delta.x * 0.2 + (Math.random() - 0.5) * penFlex.maxWobble;
-
-    const compressAmount = penFlex.maxCompress;
-    gsap.to(activePen.mesh.scale, {
-      y: 0.3 - compressAmount,
-      x: 0.3 + compressAmount / 2,
-      z: 0.3 + compressAmount / 2,
-      duration: penFlex.speed,
-      ease: "power2.out"
-    });
-
-    lastPointerPos.pos.copy(smoothedPos);
-    lastPointerPos.uv = uv.clone();
-  } else if (eraserMode && eraserMesh) {
-    // Softer eraser: gradually fades ink back to white
-    const radius = 20;
-    const px = uv.x * layer.canvas.width;
-    const py = (1 - uv.y) * layer.canvas.height;
-    
-    const prevOp = layer.ctx.globalCompositeOperation;
-    const prevAlpha = layer.ctx.globalAlpha;
-    
-    // Use 'lighter' blending to mix white in softly
-    layer.ctx.globalCompositeOperation = 'lighter';
-    layer.ctx.globalAlpha = 0.15; // low alpha = gradual fade
-    layer.ctx.fillStyle = '#fff';
-    layer.ctx.beginPath();
-    layer.ctx.arc(px, py, radius, 0, Math.PI * 2);
-    layer.ctx.fill();
-    
-    // restore ctx state
-    layer.ctx.globalAlpha = prevAlpha;
-    layer.ctx.globalCompositeOperation = prevOp;
-    
-    const paperTopY = paper.position.y + 0.25;
-    gsap.to(eraserMesh.position, { 
-      x: p.x, 
-      y: paperTopY, 
-      z: p.z, 
-      duration: 0.02 
-    });
-    eraserMesh.rotation.x = -0.1;
-    eraserMesh.rotation.z = 0.05;
-  }
-
-  layer.texture.needsUpdate = true;
+    layer.texture.needsUpdate = true;
+    updatePaperMaterial();
 });
 
 // ---------- Tools Panel ----------
@@ -460,9 +473,9 @@ toolsPanel.appendChild(clearBtn);
 clearBtn.addEventListener('click', () => {
   const layer = layers[activeLayerIndex];
   if (!layer) return;
-  layer.ctx.fillStyle = '#fff';
-  layer.ctx.fillRect(0, 0, layer.canvas.width, layer.canvas.height);
+  layer.ctx.clearRect(0, 0, layer.canvas.width, layer.canvas.height);
   layer.texture.needsUpdate = true;
+  updatePaperMaterial();
 });
 
 // ----- Divider -----
@@ -529,25 +542,30 @@ exportBtn.onmouseleave = () => exportBtn.style.background = '#27ae60';
 toolsPanel.appendChild(exportBtn);
 
 exportBtn.addEventListener('click', () => {
-  const layer = layers[activeLayerIndex];
-  if (!layer) return;
+    const layer = layers[activeLayerIndex];
+    if (!layer) return;
 
-  const format = formatSelect.value;
-  const scale = parseInt(scaleSelect.value);
+    const format = formatSelect.value;
+    const scale = parseInt(scaleSelect.value);
 
-  const exportCanvas = document.createElement('canvas');
-  exportCanvas.width = layer.canvas.width * scale;
-  exportCanvas.height = layer.canvas.height * scale;
-  const ctx = exportCanvas.getContext('2d');
-  ctx.drawImage(layer.canvas, 0, 0, exportCanvas.width, exportCanvas.height);
+    const exportCanvas = document.createElement('canvas');
+    exportCanvas.width = layer.canvas.width * scale;
+    exportCanvas.height = layer.canvas.height * scale;
+    const ctx = exportCanvas.getContext('2d');
 
-  const mime = format === 'png' ? 'image/png' : 'image/jpeg';
-  const imageData = exportCanvas.toDataURL(mime, 1.0);
+    // Draw paper first
+    ctx.drawImage(paperTexture.image, 0, 0, exportCanvas.width, exportCanvas.height);
 
-  const link = document.createElement('a');
-  link.href = imageData;
-  link.download = `${layer.name.replace(/\s+/g, '_')}.${format}`;
-  link.click();
+    // Draw layer strokes on top
+    ctx.drawImage(layer.canvas, 0, 0, exportCanvas.width, exportCanvas.height);
+
+    const mime = format === 'png' ? 'image/png' : 'image/jpeg';
+    const imageData = exportCanvas.toDataURL(mime, 1.0);
+
+    const link = document.createElement('a');
+    link.href = imageData;
+    link.download = `${layer.name.replace(/\s+/g, '_')}.${format}`;
+    link.click();
 });
 
 // ---------- Floating Holographic Text ----------
