@@ -11,6 +11,7 @@ scene.background = new THREE.Color(0xf0f0f0);
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
 camera.position.set(0, 5, 10);
+const clock = new THREE.Clock();
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -414,16 +415,37 @@ renderer.domElement.addEventListener('pointermove', event => {
         lastPointerPos.pos.copy(smoothedPos);
         lastPointerPos.uv = uv.clone();
     } else if (eraserMode && eraserMesh) {
-        const radius = 20;
+        const layer = layers[activeLayerIndex];
         const px = uv.x * layer.canvas.width;
         const py = (1 - uv.y) * layer.canvas.height;
-        
-        layer.ctx.clearRect(px - radius, py - radius, radius * 2, radius * 2);
-        layer.texture.needsUpdate = true;
-        updatePaperMaterial(); 
-        
+
+        // Calculate speed since last frame
+        const delta = new THREE.Vector3().subVectors(p, lastPointerPos.pos);
+        const speed = delta.length() / 0.016; // rough pixels/sec
+        const pressure = THREE.MathUtils.clamp(1.2 - speed / 50, 0.1, 1); 
+        // slower → stronger erase, faster → lighter erase
+
+        // Radial gradient for soft erase
+        const radius = 20;
+        const grad = layer.ctx.createRadialGradient(px, py, radius * 0.1, px, py, radius);
+        grad.addColorStop(0, `rgba(0,0,0,${pressure})`);
+        grad.addColorStop(1, 'rgba(0,0,0,0)');
+
+        const prevComp = layer.ctx.globalCompositeOperation;
+        layer.ctx.globalCompositeOperation = 'destination-out';
+        layer.ctx.fillStyle = grad;
+        layer.ctx.beginPath();
+        layer.ctx.arc(px, py, radius, 0, Math.PI * 2);
+        layer.ctx.fill();
+        layer.ctx.globalCompositeOperation = prevComp;
+
+        // Slight bobbing motion for realism
         const paperTopY = paper.position.y + 0.25;
-        gsap.to(eraserMesh.position, { x: p.x, y: paperTopY, z: p.z, duration: 0.02 });
+        gsap.to(eraserMesh.position, { x: p.x, y: paperTopY + Math.sin(Date.now() * 0.01) * 0.01, z: p.z, duration: 0.02 });
+
+        // Update last pointer
+        lastPointerPos.pos.copy(p);
+        lastPointerPos.uv = uv.clone();
     }
 
     layer.texture.needsUpdate = true;
@@ -571,6 +593,7 @@ exportBtn.addEventListener('click', () => {
 // ---------- Floating Holographic Text ----------
 let floatingText = null;
 let leanAngle = 10; // default lean in degrees, negative = lean right
+let floatingTime = 0;
 
 fontLoader.load('/fonts/helvetiker_regular.typeface.json', font => {
   const createText = (angleDeg = leanAngle) => {
@@ -609,12 +632,12 @@ fontLoader.load('/fonts/helvetiker_regular.typeface.json', font => {
       emissive: 0xd9d9d9,
       emissiveIntensity: 0,
       metalness: 1,
-      roughness: 1
+      roughness: 0.52
     });
 
     floatingText = new THREE.Mesh(textGeo, textMaterial);
     floatingText.scale.set(-1, 1, 0.01);
-    floatingText.position.set(-4 - width / 2, 7 - height / 2, 4);
+    floatingText.position.set(-4 - width / 2, 7 - height / 2, 1);
     floatingText.rotation.y = -1.5;
 
     scene.add(floatingText);
@@ -630,8 +653,27 @@ fontLoader.load('/fonts/helvetiker_regular.typeface.json', font => {
   });
 });
 
+function animateFloatingText() {
+    if (!floatingText) return;
+
+    const t = clock.getElapsedTime();
+
+    // Floating offsets
+    const floatX = Math.sin(t * 0.5) * 0.5; // left/right
+    const floatY = Math.sin(t * 0.8) * 0.3; // up/down
+    const floatZ = Math.cos(t * 0.5) * 0.5; // forward/back
+
+    floatingText.position.x = -7 + floatX;
+    floatingText.position.y = 7 + floatY;
+    floatingText.position.z = 4 + floatZ;
+
+    // Optional: tiny rotation for more holographic vibe
+    floatingText.rotation.y = -1.5 + Math.sin(t * 0.3) * 0.1;
+}
+
 // ---------- Animate ----------
 function animate() {
+  animateFloatingText();
   requestAnimationFrame(animate);
   controls.update();
   renderer.render(scene, camera);
