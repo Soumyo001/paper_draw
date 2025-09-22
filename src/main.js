@@ -657,6 +657,48 @@ function animateFloatingText() {
     floatingText.rotation.y = -1.5 + Math.sin(t * 0.3) * 0.1;
 }
 
+// ---------- Intro Camera Movement ----------
+function introCameraAnimation() {
+  // Set the initial black overlay for fade-in
+  const blackOverlay = document.createElement('div');
+  blackOverlay.style.position = 'absolute';
+  blackOverlay.style.top = '0';
+  blackOverlay.style.left = '0';
+  blackOverlay.style.width = '100vw';
+  blackOverlay.style.height = '100vh';
+  blackOverlay.style.backgroundColor = 'black';
+  blackOverlay.style.zIndex = '10000';
+  document.body.appendChild(blackOverlay);
+
+  // Start the animation with the camera at the top-right corner
+  camera.position.set(20, 20, 20);
+  camera.lookAt(new THREE.Vector3(0, 0, 0));
+
+  // Fade from black to the scene and move the camera
+  gsap.to(blackOverlay, {
+    opacity: 0,
+    duration: 2,
+    onComplete: () => {
+      blackOverlay.style.display = 'none';  // Hide the black overlay after fade
+    }
+  });
+
+  // Move camera to the desired position in front of the paper
+  gsap.to(camera.position, {
+    x: 0,   // Move the camera to the desired position in front of the paper
+    y: 5,    // Position it above the paper
+    z: 10,   // Place it in front of the paper
+    duration: 4,
+    ease: "power2.inOut"
+  });
+  gsap.to(camera.rotation, {
+    x: 0,    // Align the camera to look straight at the paper
+    y: -1.5, // Slight angle for the "Pen & Paper" text
+    duration: 3,
+    ease: "power2.inOut"
+  });
+}
+
 // ---------- Animate ----------
 function animate() {
   animateFloatingText();
@@ -664,9 +706,10 @@ function animate() {
   controls.update();
   renderer.render(scene, camera);
 }
+
+introCameraAnimation();
 animate();
 
-// ---------- Resize ----------
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
