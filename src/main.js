@@ -45,7 +45,6 @@ const fontLoader = new FontLoader();
 const paperTexture = textureLoader.load(
   '/paper.jpg',
   () => {
-    // Texture finished loading → safe to init layers now
     for (let i = 0; i < 5; i++) createLayer();
     updatePaperMaterial();
     refreshLayerUI();
@@ -152,16 +151,14 @@ refreshLayerUI();
 
 // ---------- Combine paper + layer texture ----------
 function getCombinedTexture(layer) {
-    if (!paperTexture.image) return layer.texture; // fallback
+    if (!paperTexture.image) return layer.texture;
     const canvas = document.createElement('canvas');
     canvas.width = 1024;
     canvas.height = 1024;
     const ctx = canvas.getContext('2d');
 
-    // Draw paper texture
     ctx.drawImage(paperTexture.image, 0, 0, canvas.width, canvas.height);
 
-    // Draw layer strokes on top
     ctx.drawImage(layer.canvas, 0, 0, canvas.width, canvas.height);
 
     return new THREE.CanvasTexture(canvas);
@@ -181,7 +178,7 @@ loader.load('/pen_holder2.glb', gltf => {
   holderMesh.position.set(-6, 0, 0);
   holderMesh.scale.set(8, 8, 8);
   scene.add(holderMesh);
-  updateInteractables(); // ensure holder is in interactables
+  updateInteractables();
 });
 
 // ---------- Pens ----------
@@ -286,11 +283,9 @@ renderer.domElement.addEventListener('pointerdown', event => {
   if (intersects.length > 0) {
     const obj = intersects[0].object;
 
-    // Toggle eraser only if clicked on eraser or tray (and no pen in hand)
     if (eraserMesh && (obj === eraserMesh || obj === eraserHolderSquare || eraserMesh.getObjectById(obj.id)) && !activePen) {
       eraserMode = !eraserMode;
       if (!eraserMode) {
-        // return eraser to tray
         gsap.to(eraserMesh.position, {
             x: eraserOriginalPos.x,
             y: eraserOriginalPos.y,
@@ -308,7 +303,6 @@ renderer.domElement.addEventListener('pointerdown', event => {
       return;
     }
 
-    // if eraserMode active and clicking other objects, ignore picking pens
     if (eraserMode) return;
 
     const penData = getRootPen(obj);
@@ -337,7 +331,7 @@ renderer.domElement.addEventListener('pointerdown', event => {
       pos: paperIntersects[0].point.clone(),
       uv: paperIntersects[0].uv.clone()
     };
-    smoothedPos.copy(lastPointerPos.pos); // prevent first-frame jump
+    smoothedPos.copy(lastPointerPos.pos); 
   }
 });
 
@@ -419,13 +413,10 @@ renderer.domElement.addEventListener('pointermove', event => {
         const px = uv.x * layer.canvas.width;
         const py = (1 - uv.y) * layer.canvas.height;
 
-        // Calculate speed since last frame
         const delta = new THREE.Vector3().subVectors(p, lastPointerPos.pos);
-        const speed = delta.length() / 0.016; // rough pixels/sec
+        const speed = delta.length() / 0.016;
         const pressure = THREE.MathUtils.clamp(1.2 - speed / 50, 0.1, 1); 
-        // slower → stronger erase, faster → lighter erase
 
-        // Radial gradient for soft erase
         const radius = 20;
         const grad = layer.ctx.createRadialGradient(px, py, radius * 0.1, px, py, radius);
         grad.addColorStop(0, `rgba(0,0,0,${pressure})`);
@@ -439,11 +430,9 @@ renderer.domElement.addEventListener('pointermove', event => {
         layer.ctx.fill();
         layer.ctx.globalCompositeOperation = prevComp;
 
-        // Slight bobbing motion for realism
         const paperTopY = paper.position.y + 0.25;
         gsap.to(eraserMesh.position, { x: p.x, y: paperTopY + Math.sin(Date.now() * 0.01) * 0.01, z: p.z, duration: 0.02 });
 
-        // Update last pointer
         lastPointerPos.pos.copy(p);
         lastPointerPos.uv = uv.clone();
     }
@@ -480,7 +469,7 @@ const clearBtn = document.createElement('button');
 clearBtn.innerText = 'Clear Current Layer';
 clearBtn.style.width = '100%';
 clearBtn.style.padding = '8px';
-clearBtn.style.marginBottom = '12px'; // spacing before divider
+clearBtn.style.marginBottom = '12px';
 clearBtn.style.cursor = 'pointer';
 clearBtn.style.border = 'none';
 clearBtn.style.borderRadius = '6px';
@@ -575,10 +564,8 @@ exportBtn.addEventListener('click', () => {
     exportCanvas.height = layer.canvas.height * scale;
     const ctx = exportCanvas.getContext('2d');
 
-    // Draw paper first
     ctx.drawImage(paperTexture.image, 0, 0, exportCanvas.width, exportCanvas.height);
 
-    // Draw layer strokes on top
     ctx.drawImage(layer.canvas, 0, 0, exportCanvas.width, exportCanvas.height);
 
     const mime = format === 'png' ? 'image/png' : 'image/jpeg';
@@ -592,12 +579,12 @@ exportBtn.addEventListener('click', () => {
 
 // ---------- Floating Holographic Text ----------
 let floatingText = null;
-let leanAngle = 10; // default lean in degrees, negative = lean right
+let leanAngle = 10;
 let floatingTime = 0;
 
 fontLoader.load('/fonts/helvetiker_regular.typeface.json', font => {
   const createText = (angleDeg = leanAngle) => {
-    // Remove previous text
+
     if (floatingText) scene.remove(floatingText);
 
     const textGeo = new TextGeometry('Pen & Paper', {
@@ -645,7 +632,7 @@ fontLoader.load('/fonts/helvetiker_regular.typeface.json', font => {
 
   createText();
 
-  // Optional: listen for keyboard input to adjust lean dynamically
+  // adjust lean dynamically
   window.addEventListener('keydown', e => {
     if (e.key === 'ArrowLeft') leanAngle -= 1;
     if (e.key === 'ArrowRight') leanAngle += 1;
@@ -667,7 +654,6 @@ function animateFloatingText() {
     floatingText.position.y = 7 + floatY;
     floatingText.position.z = 4 + floatZ;
 
-    // Optional: tiny rotation for more holographic vibe
     floatingText.rotation.y = -1.5 + Math.sin(t * 0.3) * 0.1;
 }
 
